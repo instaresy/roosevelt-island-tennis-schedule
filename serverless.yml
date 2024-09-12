@@ -1,0 +1,35 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: dpark068
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: roosevelt-island-tennis-scheduler
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: tennis-scheduler
+
+provider:
+  name: aws
+  runtime: python3.10
+  region: us-east-1  # Change the region if necessary
+  environment:  # Global environment variables (optional)
+    ENVIRONMENT: ${env:STAGE}
+    RIOC_URL: ${env:RIOC_URL}
+    USERNAME_1: ${env:USERNAME_1}
+    PW_1: ${env:PW_1}
+    USERNAME_2: ${env:USERNAME_2}
+    PW_2: ${env:PW_2}
+
+functions:
+  rateHandler:
+    timeout: 120
+    handler: handler.run
+    events:
+      # Run every day at 8:00 AM EST/EDT
+      - schedule:
+          name: tennisSchedulerDaily
+          description: "Run at 8:00 AM EST/EDT every day"
+          enabled: true
+          rate: cron(0 12 * * ? *)  # 12:00 UTC is 8:00 AM EST/EDT every day
+    maximumRetryAttempts: 0  # Disable retries
+
+# Include the serverless-python-requirements plugin
+plugins:
+  - serverless-python-requirements
