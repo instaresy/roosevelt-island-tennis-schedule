@@ -16,10 +16,14 @@ provider:
     PW_1: ${env:PW_1}
     USERNAME_2: ${env:USERNAME_2}
     PW_2: ${env:PW_2}
+    USERNAME_3: ${env:USERNAME_3}
+    PW_3: ${env:PW_3}
+    USERNAME_4: ${env:USERNAME_4}
+    PW_4: ${env:PW_4}
 
 functions:
   rateHandler:
-    timeout: 120
+    timeout: 180
     handler: handler.run
     events:
       # Run every day at 8:00 AM EST/EDT
@@ -27,7 +31,7 @@ functions:
           name: tennisSchedulerDaily
           description: "Run at 8:00 AM EST/EDT every day"
           enabled: true
-          rate: cron(0 12 * * ? *)  # 12:00 UTC is 8:00 AM EST/EDT every day
+          rate: cron(59 11 * * ? *)  # 11:59 UTC is 7:59 AM EST/EDT every day
     maximumRetryAttempts: 0  # Disable retries
 
 # Include the serverless-python-requirements plugin
