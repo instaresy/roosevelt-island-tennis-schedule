@@ -175,38 +175,60 @@ def process_account(account_name, account_info):
     
     username = account_info['username']
     password = account_info['password']
-    start_hour = account_info['start_hour'] #default start hour
-    court_id = tennis_facilities_map.get(account_info['court']) #default court id
-
+    court_id = tennis_facilities_map.get(account_info['court'])  # Default court id
+    
     # Authenticate to the RIOC URL
     session_cookies = authenticate(username, password)
 
     if session_cookies:
         logger.info(f'Authenticated successfully for {account_name}')
-
-        # Calculate dates two days from today
+        
         today = datetime.datetime.now()
-        start_time = today + datetime.timedelta(days=2)
 
-        # Get the full weekday name as a string
-        weekday_name = start_time.strftime('%A')
-        logger.info(f"Weekday name: {weekday_name}")  # Example output: "Wednesday"
-        start_hour = account_info['schedule'][weekday_name]['start_hour']
-        court_id = tennis_facilities_map.get(account_info['schedule'][weekday_name]['court'])
+        if today.weekday() == 4:  # If it's Friday
+            # Reserve courts for both Sunday and Monday
+            logger.info(f"Today is Friday. Reserving courts for both Sunday and Monday for {account_name}")
+            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=2)  # Sunday
+            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=3)  # Monday
 
-        start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
-        stop_time = start_time + datetime.timedelta(hours=1)
+        elif today.weekday() == 0:  # If it's Monday
+            # Reserve courts for both Tuesday and Wednesday
+            logger.info(f"Today is Monday. Reserving courts for both Tuesday and Wednesday for {account_name}")
+            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=1)  # Tuesday
+            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=2)  # Wednesday
 
-        # Check for conflicts
-        conflict_exists = conflict_check(court_id, start_time, stop_time, session_cookies)
-
-        if not conflict_exists:
-            logger.info(f"No conflict detected for {account_name}. Proceeding to create permit.")
-            create_permit(court_id, start_time, stop_time, session_cookies)
         else:
-            logger.info(f"Conflict detected for {account_name}. Skipping permit creation.")
+            # Default behavior: Reserve court two days from today
+            logger.info(f"Default behavior. Reserving court two days from today for {account_name}")
+            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=2)
+
     else:
         logger.error(f"Authentication failed for {account_name}")
+
+def reserve_court(account_name, account_info, session_cookies, court_id, days_from_today):
+    today = datetime.datetime.now()
+    start_time = today + datetime.timedelta(days=days_from_today)
+
+    # Get the full weekday name for the reservation
+    weekday_name = start_time.strftime('%A')
+    logger.info(f"Reserving court for {account_name} on {weekday_name} ({days_from_today} days from today)")
+
+    # Update start_hour and court_id based on the schedule for the specific weekday
+    start_hour = account_info['schedule'][weekday_name]['start_hour']
+    court_id = tennis_facilities_map.get(account_info['schedule'][weekday_name]['court'])
+
+    # Set start and stop times
+    start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    stop_time = start_time + datetime.timedelta(hours=1)
+
+    # Check for conflicts
+    conflict_exists = conflict_check(court_id, start_time, stop_time, session_cookies)
+
+    if not conflict_exists:
+        logger.info(f"No conflict detected for {account_name}. Proceeding to create permit.")
+        create_permit(court_id, start_time, stop_time, session_cookies)
+    else:
+        logger.info(f"Conflict detected for {account_name}. Skipping permit creation.")
 
 def run(event, context):
     current_time = datetime.datetime.now().time()
