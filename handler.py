@@ -100,6 +100,16 @@ def conflict_check(tennis_facility_id: str, start_time: datetime, stop_time: dat
         logger.error(f"An error occurred during conflict check: {str(e)}")
         return True  # Assume conflict if the check fails
 
+# Wait until the next minute before running the logic
+def wait_until_next_minute():
+    now = datetime.datetime.now()
+    next_minute = now + datetime.timedelta(minutes=1)
+    target_time = next_minute.replace(second=0, microsecond=0)
+
+    time_difference = (target_time - now).total_seconds()
+    logger.info(f"Waiting for {time_difference:.2f} seconds until {target_time}.")
+    time.sleep(time_difference)
+
 # Function to create a permit
 def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}):
     permit_url = f'{RIOC_URL}/Permits'
@@ -202,14 +212,20 @@ def run(event, context):
     current_time = datetime.datetime.now().time()
     logger.info("Your cron function ran at " + str(current_time))
 
+    # Wait until exactly the next minute
+    wait_until_next_minute()
+
     # Introduce a delay for specific seconds
     weekday = datetime.datetime.today().weekday()
 
     if weekday == 2:  # Wednesday, wait until 8:00:08
+        logger.info(f"Its {weekday} so waiting for 8 seconds")
         time.sleep(8)
     elif weekday == 4:  # Friday, wait until 8:00:13
+        logger.info(f"Its {weekday} so waiting for 13 seconds")
         time.sleep(13)
     else:  # Other days, wait until 8:00:10
+        logger.info(f"Its {weekday} so waiting for 10 seconds")
         time.sleep(10)
 
     # Run all account processes in parallel using ThreadPoolExecutor
