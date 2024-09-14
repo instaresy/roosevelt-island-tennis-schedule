@@ -23,15 +23,16 @@ provider:
 
 functions:
   rateHandler:
-    timeout: 180
+    timeout: 240
     handler: handler.run
     events:
-      # Run every day at 8:00 AM EST/EDT
+      # Run every day at 7:58 AM EST/EDT
       - schedule:
           name: tennisSchedulerDaily
-          description: "Run at 8:00 AM EST/EDT every day"
+          description: "Run at 7:58 AM EST/EDT every day"
           enabled: true
-          rate: cron(59 11 * * ? *)  # 11:59 UTC is 7:59 AM EST/EDT every day
+          rate: cron(58 11 ? * 1-5 *)  # 11:58 UTC is 7:58 AM EST/EDT, only Monday to Friday
+
     maximumRetryAttempts: 0  # Disable retries
 
 # Include the serverless-python-requirements plugin

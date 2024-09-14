@@ -3,6 +3,7 @@ import datetime
 import logging
 import requests
 import concurrent.futures
+import pytz
 from config.accounts import accounts_config
 from util.constants import RIOC_URL
 
@@ -89,13 +90,13 @@ def conflict_check(tennis_facility_id: str, start_time: datetime, stop_time: dat
             conflict_data = response.json()
             if conflict_data:  # If the array has elements, there's a conflict
                 logger.info(f"Conflict detected: {conflict_data}")
-                return True
+                return False
             else:
                 logger.info("No conflict detected.")
-                return False
+                return True   # Returns True if no conflict
         else:
             logger.error(f"Failed to check for conflicts: {response.status_code} - {response.text}")
-            return True  # Assume conflict if the check fails
+            return False  # Assume conflict if the check fails
     except requests.exceptions.RequestException as e:
         logger.error(f"An error occurred during conflict check: {str(e)}")
         return True  # Assume conflict if the check fails
@@ -109,6 +110,68 @@ def wait_until_next_minute():
     time_difference = (target_time - now).total_seconds()
     logger.info(f"Waiting for {time_difference:.2f} seconds until {target_time}.")
     time.sleep(time_difference)
+
+# Wait until it's 8:00 AM EST/EDT
+def wait_until_8am_est_edt():
+    # Define the timezone for Eastern Time (EST/EDT)
+    eastern = pytz.timezone('America/New_York')
+
+    # Get the current time in the Eastern Time Zone
+    now = datetime.datetime.now(tz=eastern)
+    
+    # Calculate the next 8:00 AM
+    next_8am = now.replace(hour=8, minute=0, second=0, microsecond=0)
+    
+    # If the current time is already past 8:00 AM today, schedule for the next day
+    if now >= next_8am:
+        next_8am = next_8am + datetime.timedelta(days=1)
+        return False  # Return False to indicate the process should not continue
+
+
+    # Calculate the time difference
+    time_difference = (next_8am - now).total_seconds()
+    
+    # Log and wait until 8:00 AM
+    logger.info(f"Waiting for {time_difference / 60:.2f} minutes until 8:00 AM EST/EDT.")
+    time.sleep(time_difference)
+    return True  # Return True to indicate the process can continue
+
+
+# Preprocessing phase: Authenticate and check conflicts early
+def preprocess_account(account_info):
+    logger.info(f"Preprocessing account {account_info['username']}")
+    
+    # Authenticate the account
+    session_cookies = authenticate(account_info['username'], account_info['password'])
+    
+    if session_cookies is None:
+        logger.error(f"Authentication failed for {account_info['username']}")
+        return None, None
+    
+    # Calculate the reservation times
+    today = datetime.datetime.now()
+    if today.weekday() == 4:  # Friday
+        days = [2, 3]  # Reserve for Sunday and Monday
+    elif today.weekday() == 0:  # Monday
+        days = [1, 2]  # Reserve for Tuesday and Wednesday
+    else:
+        days = [2]  # Default: two days from today
+
+    # Store conflict check results
+    conflict_results = {}
+    
+    for day in days:
+        start_time = today + datetime.timedelta(days=day)
+        weekday_name = start_time.strftime('%A')
+        start_hour = account_info['schedule'][weekday_name]['start_hour']
+        court_id = tennis_facilities_map.get(account_info['schedule'][weekday_name]['court'])
+        start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+        stop_time = start_time + datetime.timedelta(hours=1)
+        
+        conflict_free = conflict_check(court_id, start_time, stop_time, session_cookies)
+        conflict_results[day] = (conflict_free, court_id, start_time, stop_time)
+
+    return session_cookies, conflict_results
 
 # Function to create a permit
 def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}):
@@ -168,74 +231,40 @@ def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {
     except requests.exceptions.RequestException as e:
         logger.error(f"An error occurred during permit creation: {str(e)}")
 
-# Function to process an individual account
-def process_account(account_name, account_info):
-    current_time = datetime.datetime.now().time()
-    logger.info(f'Starting process for {account_name} at {str(current_time)}')
+# Execution phase: Create permits at exactly the specified time
+def create_permits(account_info, session_cookies, conflict_results):
+    logger.info(f"Executing permit creation for {account_info['username']}")
     
-    username = account_info['username']
-    password = account_info['password']
-    court_id = tennis_facilities_map.get(account_info['court'])  # Default court id
-    
-    # Authenticate to the RIOC URL
-    session_cookies = authenticate(username, password)
-
-    if session_cookies:
-        logger.info(f'Authenticated successfully for {account_name}')
-        
-        today = datetime.datetime.now()
-
-        if today.weekday() == 4:  # If it's Friday
-            # Reserve courts for both Sunday and Monday
-            logger.info(f"Today is Friday. Reserving courts for both Sunday and Monday for {account_name}")
-            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=2)  # Sunday
-            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=3)  # Monday
-
-        elif today.weekday() == 0:  # If it's Monday
-            # Reserve courts for both Tuesday and Wednesday
-            logger.info(f"Today is Monday. Reserving courts for both Tuesday and Wednesday for {account_name}")
-            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=1)  # Tuesday
-            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=2)  # Wednesday
-
+    for day, (conflict_free, court_id, start_time, stop_time) in conflict_results.items():
+        if conflict_free:
+            logger.info(f"No conflict detected for {start_time}. Creating permit.")
+            create_permit(court_id, start_time, stop_time, session_cookies)
         else:
-            # Default behavior: Reserve court two days from today
-            logger.info(f"Default behavior. Reserving court two days from today for {account_name}")
-            reserve_court(account_name, account_info, session_cookies, court_id, days_from_today=2)
-
-    else:
-        logger.error(f"Authentication failed for {account_name}")
-
-def reserve_court(account_name, account_info, session_cookies, court_id, days_from_today):
-    today = datetime.datetime.now()
-    start_time = today + datetime.timedelta(days=days_from_today)
-
-    # Get the full weekday name for the reservation
-    weekday_name = start_time.strftime('%A')
-    logger.info(f"Reserving court for {account_name} on {weekday_name} ({days_from_today} days from today)")
-
-    # Update start_hour and court_id based on the schedule for the specific weekday
-    start_hour = account_info['schedule'][weekday_name]['start_hour']
-    court_id = tennis_facilities_map.get(account_info['schedule'][weekday_name]['court'])
-
-    # Set start and stop times
-    start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
-    stop_time = start_time + datetime.timedelta(hours=1)
-
-    # Check for conflicts
-    conflict_exists = conflict_check(court_id, start_time, stop_time, session_cookies)
-
-    if not conflict_exists:
-        logger.info(f"No conflict detected for {account_name}. Proceeding to create permit.")
-        create_permit(court_id, start_time, stop_time, session_cookies)
-    else:
-        logger.info(f"Conflict detected for {account_name}. Skipping permit creation.")
+            logger.info(f"Conflict detected for {start_time}. Skipping permit creation.")
 
 def run(event, context):
     current_time = datetime.datetime.now().time()
     logger.info("Your cron function ran at " + str(current_time))
 
-    # Wait until exactly the next minute
-    wait_until_next_minute()
+    # Preprocess accounts: Authenticate and check conflicts
+    account_data = {}
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_preprocess = {
+            executor.submit(preprocess_account, account_info): account_info
+            for account_info in accounts_config.values()
+        }
+        for future in concurrent.futures.as_completed(future_preprocess):
+            account_info = future_preprocess[future]
+            session_cookies, conflict_results = future.result()
+            if session_cookies and conflict_results: # if no session cookie, dont add
+                account_data[account_info['username']] = (session_cookies, conflict_results)
+
+    # wait_until_next_minute()
+    # Check if we should wait until 8:00 AM or exit early
+    if not wait_until_8am_est_edt():
+        logger.info("Process exited because it's already past 8:00 AM.")
+        return  # Exit early
 
     # Introduce a delay for specific seconds
     weekday = datetime.datetime.today().weekday()
@@ -250,13 +279,12 @@ def run(event, context):
         logger.info(f"Its {weekday} so waiting for 10 seconds")
         time.sleep(10)
 
-    # Run all account processes in parallel using ThreadPoolExecutor
+    # Execute account permit creation at the intended time
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
-        for account_name, account_info in accounts_config.items():
-            futures.append(executor.submit(process_account, account_name, account_info))
-
-        # Wait for all futures to complete
+        for username, (session_cookies, conflict_results) in account_data.items():
+            account_info = next(info for info in accounts_config.values() if info['username'] == username)
+            futures.append(executor.submit(create_permits, account_info, session_cookies, conflict_results))
         concurrent.futures.wait(futures)
     
     logger.info("All account processes completed.")
