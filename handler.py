@@ -1,3 +1,4 @@
+import random
 import time
 import datetime
 import logging
@@ -19,6 +20,94 @@ tennis_facilities_map = {
     5: "8a5ca8e8-3be0-4145-a4ef-91a69671295b",
     6: "77c7f42c-8891-4818-a610-d5c1027c62fe"
 }
+
+# Define which days to book based on current weekday
+def get_days_to_book():
+    eastern = pytz.timezone('America/New_York')
+    today = datetime.datetime.now(tz=eastern).weekday()  # 0 is Monday, 6 is Sunday
+    logger.info(f'get_days_to_book {today}')
+
+    if today == 0:  # Monday, book for Tuesday and Wednesday (offset 1, 2)
+        return [1, 2]
+    elif today == 1:  # Tuesday, book for Thursday (offset 2)
+        return [2]
+    elif today == 2:  # Wednesday, book for Friday (offset 2)
+        return [2]
+    elif today == 3:  # Thursday, book for Saturday (offset 2)
+        return [2]
+    elif today == 4:  # Friday, book for Sunday (offset 2) and Monday (offset 3)
+        return [2, 3]
+    elif today == 5:  # Saturday, book for Monday (offset 2) and Tuesday (offset 3)
+        return [2, 3]
+    return []
+
+# Function to get the priority list of courts and times by weekday
+def get_court_and_time_priority_by_weekday():
+    return {
+        1: [(3, 18), (3, 19), (2, 18), (2, 19)],  # Tuesday
+        2: [(3, 18), (3, 19), (5, 18), (5, 19)],  # Wednesday
+        3: [(6, 18), (6, 19), (2, 18), (2, 19)],  # Thursday
+        4: [(3, 18), (3, 19), (5, 18), (5, 19)],  # Friday
+        5: [(3, 11), (3, 12), (5, 11), (5, 12)],  # Saturday
+        6: [(3, 11), (3, 12), (2, 11), (2, 12)],  # Sunday
+        0: [(6, 18), (6, 19), (2, 18), (2, 19)]   # Monday
+    }
+
+# Randomize accounts for assignment
+def randomize_accounts():
+    accounts = list(accounts_config.values())
+    random.shuffle(accounts)
+    return accounts
+
+# Helper function to calculate the actual day of the week based on offset
+def get_weekday_from_offset(offset):
+    eastern = pytz.timezone('America/New_York')
+    today = datetime.datetime.now(tz=eastern)  # 0 is Monday, 6 is Sunday
+    target_day = today + datetime.timedelta(days=offset)
+    return target_day
+
+# Assign accounts to courts and times based on priority list
+def assign_accounts_to_courts_and_times(days_to_book):
+    assignments = []
+    accounts = randomize_accounts()
+    priority_courts_and_times = get_court_and_time_priority_by_weekday()
+    logger.info(f'assign_accounts_to_courts_and_times accounts: {accounts} days_to_book: {days_to_book}')
+    for offset in days_to_book:
+        day = get_weekday_from_offset(offset)  # Convert offset to actual weekday
+        courts_and_times = priority_courts_and_times.get(day.weekday(), [])
+        logger.info(f'offset: {offset} target_day: {day} courts_and_times: {courts_and_times}')
+        # Assign accounts to the priority courts/times for the calculated weekday
+        for i, (court, start_hour) in enumerate(courts_and_times):
+            if i < len(accounts):
+                account = accounts[i]
+                assignments.append((account, tennis_facilities_map.get(court), start_hour, offset))  # Use the offset for booking
+            else:
+                logger.info(f"Not enough accounts for court {court} at {start_hour} on day {day}, skipping.")
+    
+    return assignments
+
+# Function to preprocess account with the assigned court, time, and day
+def preprocess_account_with_assignment(account_info, court, start_hour, days_from_today):
+    logger.info(f"Preprocessing account {account_info['username']} for court {court} at hour {start_hour}, booking {days_from_today} days from today")
+
+    # Authenticate the account
+    session_cookies = authenticate(account_info['username'], account_info['password'])
+    
+    if session_cookies is None:
+        logger.error(f"Authentication failed for {account_info['username']}")
+        return None, None
+    
+    # Calculate the reservation time
+    eastern = pytz.timezone('America/New_York')
+    today = datetime.datetime.now(tz=eastern)
+    start_time = today.replace(hour=start_hour, minute=0, second=0, microsecond=0) + datetime.timedelta(days=days_from_today)
+    # start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    stop_time = start_time + datetime.timedelta(hours=1)
+    
+    # Check conflict
+    conflict_free = conflict_check(court, start_time, stop_time, session_cookies)
+    
+    return session_cookies, (conflict_free, court, start_time, stop_time)
 
 # Function to authenticate with the RIOC URL
 def authenticate(username: str, password: str):
@@ -136,43 +225,6 @@ def wait_until_8am_est_edt():
     time.sleep(time_difference)
     return True  # Return True to indicate the process can continue
 
-
-# Preprocessing phase: Authenticate and check conflicts early
-def preprocess_account(account_info):
-    logger.info(f"Preprocessing account {account_info['username']}")
-    
-    # Authenticate the account
-    session_cookies = authenticate(account_info['username'], account_info['password'])
-    
-    if session_cookies is None:
-        logger.error(f"Authentication failed for {account_info['username']}")
-        return None, None
-    
-    # Calculate the reservation times
-    today = datetime.datetime.now()
-    if today.weekday() == 4:  # Friday
-        days = [2, 3]  # Reserve for Sunday and Monday
-    elif today.weekday() == 0:  # Monday
-        days = [1, 2]  # Reserve for Tuesday and Wednesday
-    else:
-        days = [2]  # Default: two days from today
-
-    # Store conflict check results
-    conflict_results = {}
-    
-    for day in days:
-        start_time = today + datetime.timedelta(days=day)
-        weekday_name = start_time.strftime('%A')
-        start_hour = account_info['schedule'][weekday_name]['start_hour']
-        court_id = tennis_facilities_map.get(account_info['schedule'][weekday_name]['court'])
-        start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
-        stop_time = start_time + datetime.timedelta(hours=1)
-        
-        conflict_free = conflict_check(court_id, start_time, stop_time, session_cookies)
-        conflict_results[day] = (conflict_free, court_id, start_time, stop_time)
-
-    return session_cookies, conflict_results
-
 # Function to create a permit
 def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}):
     permit_url = f'{RIOC_URL}/Permits'
@@ -233,9 +285,10 @@ def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {
 
 # Execution phase: Create permits at exactly the specified time
 def create_permits(account_info, session_cookies, conflict_results):
-    logger.info(f"Executing permit creation for {account_info['username']}")
+    logger.info(f"Executing permit creation for {account_info['username']} account_info: {account_info} conflict_results {conflict_results}")
     
-    for day, (conflict_free, court_id, start_time, stop_time) in conflict_results.items():
+    for (conflict_free, court_id, start_time, stop_time) in conflict_results:
+
         if conflict_free:
             logger.info(f"No conflict detected for {start_time}. Creating permit.")
             create_permit(court_id, start_time, stop_time, session_cookies)
@@ -243,40 +296,55 @@ def create_permits(account_info, session_cookies, conflict_results):
             logger.info(f"Conflict detected for {start_time}. Skipping permit creation.")
 
 def run(event, context):
-    current_time = datetime.datetime.now().time()
-    logger.info("Your cron function ran at " + str(current_time))
+    eastern = pytz.timezone('America/New_York')
+    current_time = datetime.datetime.now(tz=eastern)
+    logger.info("Your cron function ran at " + str(current_time.time()))
 
+    # Determine which days to book based on the current weekday
+    days_to_book = get_days_to_book()
+    if not days_to_book:
+        logger.info("No days to book. Exiting.")
+        return
+    
+    logger.info(f"FINAL FINAL {days_to_book}")
+    
+    # Assign accounts to courts and times based on the priority list
+    assignments = assign_accounts_to_courts_and_times(days_to_book)
+    logger.info(f"FINAL assignments {assignments}")
+    
     # Preprocess accounts: Authenticate and check conflicts
     account_data = {}
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future_preprocess = {
-            executor.submit(preprocess_account, account_info): account_info
-            for account_info in accounts_config.values()
+            executor.submit(preprocess_account_with_assignment, account_info, court, start_hour, day): account_info
+            for account_info, court, start_hour, day in assignments
         }
         for future in concurrent.futures.as_completed(future_preprocess):
             account_info = future_preprocess[future]
             session_cookies, conflict_results = future.result()
-            if session_cookies and conflict_results: # if no session cookie, dont add
-                account_data[account_info['username']] = (session_cookies, conflict_results)
+            if session_cookies and conflict_results:  # if no session cookie, don't add
+                account_data[account_info['username']] = (session_cookies, [conflict_results])
 
     # wait_until_next_minute()
+
     # Check if we should wait until 8:00 AM or exit early
     if not wait_until_8am_est_edt():
         logger.info("Process exited because it's already past 8:00 AM.")
         return  # Exit early
 
     # Introduce a delay for specific seconds
-    weekday = datetime.datetime.today().weekday()
+    weekday = datetime.datetime.now(tz=eastern).weekday()
+    weekday_string = datetime.datetime.now(tz=eastern).strftime("%A")
 
     if weekday == 2:  # Wednesday, wait until 8:00:08
-        logger.info(f"Its {weekday} so waiting for 8 seconds")
+        logger.info(f"Its {weekday_string} so waiting for 8 seconds")
         time.sleep(8)
     elif weekday == 4:  # Friday, wait until 8:00:13
-        logger.info(f"Its {weekday} so waiting for 13 seconds")
+        logger.info(f"Its {weekday_string} so waiting for 13 seconds")
         time.sleep(13)
     else:  # Other days, wait until 8:00:10
-        logger.info(f"Its {weekday} so waiting for 10 seconds")
+        logger.info(f"Its {weekday_string} so waiting for 10 seconds")
         time.sleep(10)
 
     # Execute account permit creation at the intended time
