@@ -3,8 +3,11 @@ import time
 import datetime
 import logging
 import requests
+import json
 import concurrent.futures
 import pytz
+from requests.cookies import RequestsCookieJar
+
 from config.accounts import accounts_config
 from util.constants import RIOC_URL
 
@@ -25,7 +28,6 @@ tennis_facilities_map = {
 def get_days_to_book():
     eastern = pytz.timezone('America/New_York')
     today = datetime.datetime.now(tz=eastern).weekday()  # 0 is Monday, 6 is Sunday
-    logger.info(f'get_days_to_book {today}')
 
     if today == 0:  # Monday, book for Tuesday and Wednesday (offset 1, 2)
         return [1, 2]
@@ -36,8 +38,6 @@ def get_days_to_book():
     elif today == 3:  # Thursday, book for Saturday (offset 2)
         return [2]
     elif today == 4:  # Friday, book for Sunday (offset 2) and Monday (offset 3)
-        return [2, 3]
-    elif today == 5:  # Saturday, book for Monday (offset 2) and Tuesday (offset 3)
         return [2, 3]
     return []
 
@@ -71,24 +71,22 @@ def assign_accounts_to_courts_and_times(days_to_book):
     assignments = []
     accounts = randomize_accounts()
     priority_courts_and_times = get_court_and_time_priority_by_weekday()
-    logger.info(f'assign_accounts_to_courts_and_times accounts: {accounts} days_to_book: {days_to_book}')
     for offset in days_to_book:
-        day = get_weekday_from_offset(offset)  # Convert offset to actual weekday
-        courts_and_times = priority_courts_and_times.get(day.weekday(), [])
-        logger.info(f'offset: {offset} target_day: {day} courts_and_times: {courts_and_times}')
+        target_day = get_weekday_from_offset(offset)  # Convert offset to actual weekday
+        courts_and_times = priority_courts_and_times.get(target_day.weekday(), [])
         # Assign accounts to the priority courts/times for the calculated weekday
         for i, (court, start_hour) in enumerate(courts_and_times):
             if i < len(accounts):
                 account = accounts[i]
                 assignments.append((account, tennis_facilities_map.get(court), start_hour, offset))  # Use the offset for booking
             else:
-                logger.info(f"Not enough accounts for court {court} at {start_hour} on day {day}, skipping.")
+                logger.info(f"Not enough accounts for court {court} at {start_hour} on day {target_day}, skipping.")
     
     return assignments
 
 # Function to preprocess account with the assigned court, time, and day
 def preprocess_account_with_assignment(account_info, court, start_hour, days_from_today):
-    logger.info(f"Preprocessing account {account_info['username']} for court {court} at hour {start_hour}, booking {days_from_today} days from today")
+    # logger.info(f"Preprocessing account {account_info['username']} for court {court} at hour {start_hour}, booking {days_from_today} days from today")
 
     # Authenticate the account
     session_cookies = authenticate(account_info['username'], account_info['password'])
@@ -101,12 +99,9 @@ def preprocess_account_with_assignment(account_info, court, start_hour, days_fro
     eastern = pytz.timezone('America/New_York')
     today = datetime.datetime.now(tz=eastern)
     start_time = today.replace(hour=start_hour, minute=0, second=0, microsecond=0) + datetime.timedelta(days=days_from_today)
-    # start_time = start_time.replace(hour=start_hour, minute=0, second=0, microsecond=0)
     stop_time = start_time + datetime.timedelta(hours=1)
-    
     # Check conflict
     conflict_free = conflict_check(court, start_time, stop_time, session_cookies)
-    
     return session_cookies, (conflict_free, court, start_time, stop_time)
 
 # Function to authenticate with the RIOC URL
@@ -134,8 +129,6 @@ def authenticate(username: str, password: str):
     try:
         # Send the POST request to log in
         response = requests.post(login_url, data=payload, headers=headers, allow_redirects=False)
-        logger.info(f'resp headers {response.headers}')
-        logger.info(f'resp body {response.content.decode()}')
         
         # Check if login was successful (e.g., status code 200 or similar success criteria)  
         if response.status_code == 302:
@@ -188,7 +181,7 @@ def conflict_check(tennis_facility_id: str, start_time: datetime, stop_time: dat
             return False  # Assume conflict if the check fails
     except requests.exceptions.RequestException as e:
         logger.error(f"An error occurred during conflict check: {str(e)}")
-        return True  # Assume conflict if the check fails
+        return False  # Assume conflict if the check fails
 
 # Wait until the next minute before running the logic
 def wait_until_next_minute():
@@ -285,15 +278,23 @@ def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {
 
 # Execution phase: Create permits at exactly the specified time
 def create_permits(account_info, session_cookies, conflict_results):
-    logger.info(f"Executing permit creation for {account_info['username']} account_info: {account_info} conflict_results {conflict_results}")
+    # logger.info(f"create_permits --> Executing permit creation for {account_info['username']} account_info: {account_info} conflict_results {conflict_results}")
     
     for (conflict_free, court_id, start_time, stop_time) in conflict_results:
 
-        if conflict_free:
-            logger.info(f"No conflict detected for {start_time}. Creating permit.")
-            create_permit(court_id, start_time, stop_time, session_cookies)
-        else:
-            logger.info(f"Conflict detected for {start_time}. Skipping permit creation.")
+        logger.info(f"create_permits --> Creating permit for court user {account_info['username']} and court {court_id}  at {start_time}.")
+        create_permit(court_id, start_time, stop_time, session_cookies)
+
+# Custom serialization function for non-serializable objects
+def custom_serializer(obj):
+    if isinstance(obj, RequestsCookieJar):
+        # Convert RequestsCookieJar to a dict
+        return {c.name: c.value for c in obj}
+    elif isinstance(obj, datetime.datetime):
+        # Convert datetime to ISO format
+        return obj.isoformat()
+    else:
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 def run(event, context):
     eastern = pytz.timezone('America/New_York')
@@ -302,19 +303,19 @@ def run(event, context):
 
     # Determine which days to book based on the current weekday
     days_to_book = get_days_to_book()
+    logger.info(f"LOG days_to_book {days_to_book}")
+
     if not days_to_book:
-        logger.info("No days to book. Exiting.")
+        logger.info(f"No days to book today {current_time}. Exiting.")
         return
-    
-    logger.info(f"FINAL FINAL {days_to_book}")
-    
+
     # Assign accounts to courts and times based on the priority list
     assignments = assign_accounts_to_courts_and_times(days_to_book)
-    logger.info(f"FINAL assignments {assignments}")
+    logger.info(f"assignments {json.dumps(assignments)}")
     
     # Preprocess accounts: Authenticate and check conflicts
     account_data = {}
-
+    conflict_account_data = {}
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future_preprocess = {
             executor.submit(preprocess_account_with_assignment, account_info, court, start_hour, day): account_info
@@ -323,10 +324,23 @@ def run(event, context):
         for future in concurrent.futures.as_completed(future_preprocess):
             account_info = future_preprocess[future]
             session_cookies, conflict_results = future.result()
-            if session_cookies and conflict_results:  # if no session cookie, don't add
-                account_data[account_info['username']] = (session_cookies, [conflict_results])
+            if session_cookies and conflict_results[0] == True:  # if no session cookie or has conflict, don't add
+                if account_info['username'] in account_data:
+                    # If the account already exists in the dictionary, append the conflict results
+                    account_data[account_info['username']][1].append(conflict_results)
+                else:
+                    # If the account is not yet in the dictionary, add it with the conflict results
+                    account_data[account_info['username']] = (session_cookies, [conflict_results])
+            else: # add to failure list
+                if account_info['username'] in conflict_account_data:
+                    # If the account already exists in the dictionary, append the conflict results
+                    conflict_account_data[account_info['username']][1].append(conflict_results)
+                else:
+                    # If the account is not yet in the dictionary, add it with the conflict results
+                    conflict_account_data[account_info['username']] = (session_cookies, [conflict_results])
 
-    # wait_until_next_minute()
+    logger.info(f"LOG account_data {json.dumps(account_data, default=custom_serializer)}")
+    logger.info(f"LOG conflict_account_data {json.dumps(conflict_account_data, default=custom_serializer)}")
 
     # Check if we should wait until 8:00 AM or exit early
     if not wait_until_8am_est_edt():
