@@ -31,8 +31,7 @@ functions:
           name: tennisSchedulerDaily
           description: "Run at 7:58 AM EST/EDT every day"
           enabled: true
-          rate: cron(58 11 ? * 1-5 *)  # 11:58 UTC is 7:58 AM EST/EDT, only Monday to Friday
-
+          rate: cron(58 11 ? * 2-6 *)  # 11:58 UTC is 7:58 AM EST/EDT, only Monday to Friday
     maximumRetryAttempts: 0  # Disable retries
 
 # Include the serverless-python-requirements plugin
