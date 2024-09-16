@@ -100,6 +100,11 @@ def preprocess_account_with_assignment(account_info, court, start_hour, days_fro
     today = datetime.datetime.now(tz=eastern)
     start_time = today.replace(hour=start_hour, minute=0, second=0, microsecond=0) + datetime.timedelta(days=days_from_today)
     stop_time = start_time + datetime.timedelta(hours=1)
+
+    #remove tz as rioc already reads iso as default EASTERN
+    start_time = start_time.replace(tzinfo=None)
+    stop_time = stop_time.replace(tzinfo=None)
+
     # Check conflict
     conflict_free = conflict_check(court, start_time, stop_time, session_cookies)
     return session_cookies, (conflict_free, court, start_time, stop_time)
