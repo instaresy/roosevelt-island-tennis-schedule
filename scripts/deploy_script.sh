@@ -19,7 +19,7 @@ npm install
 
 # Deploy using Serverless Framework
 echo "Starting serverless deployment..."
-serverless deploy
+sudo serverless deploy
 
 if [ $? -eq 0 ]; then
     echo "Serverless deploy succeeded."

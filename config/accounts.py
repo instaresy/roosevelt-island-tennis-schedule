@@ -1,4 +1,4 @@
-from util.constants import USERNAME_1, PW_1, USERNAME_2, PW_2, USERNAME_3, PW_3, USERNAME_4, PW_4
+from util.constants import USERNAME_1, PW_1, USERNAME_2, PW_2, USERNAME_3, PW_3, USERNAME_4, PW_4, USERNAME_5, PW_5
 
 accounts_config = {
     "account1": {
@@ -19,6 +19,11 @@ accounts_config = {
     "account4": {
         "username": USERNAME_4,
         "password": PW_4,
+        "court": 1
+    },
+    "account5": {
+        "username": USERNAME_5,
+        "password": PW_5,
         "court": 1
     }
 }
