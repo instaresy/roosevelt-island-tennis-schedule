@@ -7,6 +7,7 @@ import json
 import concurrent.futures
 import pytz
 from requests.cookies import RequestsCookieJar
+from tabulate import tabulate
 
 from config.accounts import accounts_config
 from util.constants import RIOC_URL
@@ -170,16 +171,13 @@ def conflict_check(tennis_facility_id: str, start_time: datetime, stop_time: dat
 
     try:
         response = requests.post(conflict_url, json=payload, headers=headers, cookies=session_cookies)
-        logger.info(f'Conflict check response: {response.content.decode()}')
 
         # Check if the response is an empty array
         if response.status_code == 200:
             conflict_data = response.json()
             if conflict_data:  # If the array has elements, there's a conflict
-                logger.info(f"Conflict detected: {conflict_data}")
                 return False
             else:
-                logger.info("No conflict detected.")
                 return True   # Returns True if no conflict
         else:
             logger.error(f"Failed to check for conflicts: {response.status_code} - {response.text}")
@@ -301,6 +299,18 @@ def custom_serializer(obj):
     else:
         raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
+# Function to display account data in tabular format using pandas
+def display_account_data_in_table(account_data):
+    # Convert to a list of rows
+    rows = []
+    for account, bookings in account_data.items():
+        for booking in bookings[1]:
+            conflict_free, court, start_time, end_time = booking
+            rows.append([account, conflict_free, court, start_time, end_time])
+    
+    # Display table
+    logger.info(tabulate(rows, headers=["Account", "conflict_free", "Court", "Start Time", "End Time"], tablefmt="grid"))
+
 def run(event, context):
     eastern = pytz.timezone('America/New_York')
     current_time = datetime.datetime.now(tz=eastern)
@@ -374,4 +384,11 @@ def run(event, context):
             futures.append(executor.submit(create_permits, account_info, session_cookies, conflict_results))
         concurrent.futures.wait(futures)
     
+    # Display the account_data in tabular format
+    try:
+        display_account_data_in_table(account_data)
+        display_account_data_in_table(conflict_account_data)
+    except:
+        logger.info(f"Failed to create table of successful/failed reservations")
+
     logger.info("All account processes completed.")
