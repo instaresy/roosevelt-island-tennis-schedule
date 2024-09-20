@@ -22,6 +22,12 @@ provider:
     PW_4: ${env:PW_4}
     USERNAME_5: ${env:USERNAME_5}
     PW_5: ${env:PW_5}
+    USERNAME_6: ${env:USERNAME_6}
+    PW_6: ${env:PW_6}
+    USERNAME_7: ${env:USERNAME_7}
+    PW_7: ${env:PW_7}
+    USERNAME_8: ${env:USERNAME_8}
+    PW_8: ${env:PW_8}
 
 functions:
   rateHandler:

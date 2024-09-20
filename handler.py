@@ -45,13 +45,13 @@ def get_days_to_book():
 # Function to get the priority list of courts and times by weekday
 def get_court_and_time_priority_by_weekday():
     return {
-        1: [(3, 18), (3, 19), (2, 18), (2, 19)],  # Tuesday
-        2: [(3, 18), (3, 19), (5, 18), (5, 19)],  # Wednesday
-        3: [(6, 18), (6, 19), (2, 18), (2, 19)],  # Thursday
-        4: [(3, 18), (3, 19), (5, 18), (5, 19)],  # Friday
-        5: [(3, 11), (3, 12), (5, 11), (5, 12)],  # Saturday
-        6: [(6, 15), (6, 14), (5, 15), (5, 14), (6, 13), (5, 13), (4,15), (4,14)],  # Sunday
-        0: [(6, 18), (6, 19), (2, 18), (2, 19)]   # Monday
+        1: [[(3, 18)], [(3, 19)], [(2, 18)], [(2, 19)]],  # Tuesday
+        2: [[(3, 18)], [(3, 19)], [(5, 18)], [(5, 19)]],  # Wednesday
+        3: [[(6, 18)], [(6, 19)], [(2, 18)], [(2, 19)]],  # Thursday
+        4: [[(3, 18)], [(3, 19)], [(5, 18)], [(5, 19)]],  # Friday
+        5: [[(3, 11)], [(3, 12)], [(5, 11)], [(5, 12)]],  # Saturday
+        6: [[(6, 15),(3,15)], [(6, 14),(3,14)], [(5, 15)], [(5, 14)], [(6, 13),(3,13)], [(5, 13),(4,13)], [(4,15)], [(4,14)]],  # Sunday
+        0: [[(6, 18),(3,18)], [(6, 19),(3,19)], [(2, 18)], [(2, 19)]]   # Monday
     }
 
 # Randomize accounts for assignment
@@ -76,17 +76,17 @@ def assign_accounts_to_courts_and_times(days_to_book):
         target_day = get_weekday_from_offset(offset)  # Convert offset to actual weekday
         courts_and_times = priority_courts_and_times.get(target_day.weekday(), [])
         # Assign accounts to the priority courts/times for the calculated weekday
-        for i, (court, start_hour) in enumerate(courts_and_times):
+        for i, court_and_time_w_backups in enumerate(courts_and_times):
             if i < len(accounts):
                 account = accounts[i]
-                assignments.append((account, tennis_facilities_map.get(court), start_hour, offset))  # Use the offset for booking
+                assignments.append((account, court_and_time_w_backups, offset))  # Use the offset for booking
             else:
-                logger.info(f"Not enough accounts for court {court} at {start_hour} on day {target_day}, skipping.")
+                logger.info(f"Not enough accounts for {i}th at {court_and_time_w_backups} on day {target_day}, skipping.")
     
     return assignments
 
 # Function to preprocess account with the assigned court, time, and day
-def preprocess_account_with_assignment(account_info, court, start_hour, days_from_today):
+def preprocess_account_with_assignment(account_info, court_and_time_w_backups, days_from_today):
     # logger.info(f"Preprocessing account {account_info['username']} for court {court} at hour {start_hour}, booking {days_from_today} days from today")
 
     # Authenticate the account
@@ -96,19 +96,24 @@ def preprocess_account_with_assignment(account_info, court, start_hour, days_fro
         logger.error(f"Authentication failed for {account_info['username']}")
         return None, None
     
-    # Calculate the reservation time
-    eastern = pytz.timezone('America/New_York')
-    today = datetime.datetime.now(tz=eastern)
-    start_time = today.replace(hour=start_hour, minute=0, second=0, microsecond=0) + datetime.timedelta(days=days_from_today)
-    stop_time = start_time + datetime.timedelta(hours=1)
+    for (court, start_hour) in court_and_time_w_backups:
+        court_id = tennis_facilities_map.get(court)
+        # Calculate the reservation time
+        eastern = pytz.timezone('America/New_York')
+        today = datetime.datetime.now(tz=eastern)
+        start_time = today.replace(hour=start_hour, minute=0, second=0, microsecond=0) + datetime.timedelta(days=days_from_today)
+        stop_time = start_time + datetime.timedelta(hours=1)
 
-    #remove tz as rioc already reads iso as default EASTERN
-    start_time = start_time.replace(tzinfo=None)
-    stop_time = stop_time.replace(tzinfo=None)
+        #remove tz as rioc already reads iso as default EASTERN
+        start_time = start_time.replace(tzinfo=None)
+        stop_time = stop_time.replace(tzinfo=None)
 
-    # Check conflict
-    conflict_free = conflict_check(court, start_time, stop_time, session_cookies)
-    return session_cookies, (conflict_free, court, start_time, stop_time)
+        # Check conflict
+        conflict_free = conflict_check(court_id, start_time, stop_time, session_cookies)
+        if conflict_free:
+            return session_cookies, (conflict_free, court_id, start_time, stop_time)
+    
+    return session_cookies, (False, None, None, None)
 
 # Function to authenticate with the RIOC URL
 def authenticate(username: str, password: str):
@@ -333,8 +338,8 @@ def run(event, context):
     conflict_account_data = {}
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future_preprocess = {
-            executor.submit(preprocess_account_with_assignment, account_info, court, start_hour, day): account_info
-            for account_info, court, start_hour, day in assignments
+            executor.submit(preprocess_account_with_assignment, account_info, court_and_time_w_backups, day): account_info
+            for account_info, court_and_time_w_backups, day in assignments
         }
         for future in concurrent.futures.as_completed(future_preprocess):
             account_info = future_preprocess[future]
