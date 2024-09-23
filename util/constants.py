@@ -2,6 +2,8 @@ import os
 
 stage = os.environ.get('STAGE', None)
 RIOC_URL = os.getenv('RIOC_URL')
+PERMIT_QUEUE_URL = os.getenv('PERMIT_QUEUE_URL')
+
 USERNAME_1 = os.getenv('USERNAME_1')
 PW_1 = os.getenv('PW_1')
 USERNAME_2 = os.getenv('USERNAME_2')

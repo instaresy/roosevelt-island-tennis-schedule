@@ -28,6 +28,22 @@ provider:
     PW_7: ${env:PW_7}
     USERNAME_8: ${env:USERNAME_8}
     PW_8: ${env:PW_8}
+  # Add IAM permissions for SQS globally to all functions
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - sqs:SendMessage
+      Resource:
+        - Fn::GetAtt: [PermitQueue, Arn]  # Allow sending messages to the PermitQueue
+
+# Define SQS queue
+resources:
+  Resources:
+    PermitQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: tennis-create-permit-queue
+        VisibilityTimeout: 400  # Set visibility timeout to 400 seconds (greater than Lambda's 360s)
 
 functions:
   rateHandler:
@@ -40,8 +56,21 @@ functions:
           description: "Run at 7:58 AM EST/EDT every day"
           enabled: true
           rate: cron(58 11 ? * 2-6 *)  # 11:58 UTC is 7:58 AM EST/EDT, only Monday to Friday
+    environment:
+      PERMIT_QUEUE_URL:
+        Ref: PermitQueue
     maximumRetryAttempts: 0  # Disable retries
 
-# Include the serverless-python-requirements plugin
+  # Process SQS messages and create permits
+  permitProcessor:
+    handler: permit_processor.process
+    timeout: 360
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [PermitQueue, Arn]
+          batchSize: 2  # Number of messages to process in each invocation
+    maximumRetryAttempts: 0
+
 plugins:
   - serverless-python-requirements
