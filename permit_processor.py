@@ -88,7 +88,7 @@ def process_record(record):
     weekday = datetime.datetime.now(tz=eastern).weekday()
     weekday_string = datetime.datetime.now(tz=eastern).strftime("%A")
 
-    if weekday == 2 or weekday == 1:  # Tuesday or Wednesday, wait until 8:00:08
+    if weekday == 0 or weekday == 2 or weekday == 1:  # Tuesday or Wednesday, wait until 8:00:08
         logger.info(f"Its {weekday_string} so waiting for 8 seconds")
         time.sleep(8)
     elif weekday == 4:  # Friday, wait until 8:00:13
