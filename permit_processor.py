@@ -91,9 +91,9 @@ def process_record(record):
     if weekday == 0 or weekday == 2 or weekday == 1:  # Tuesday or Wednesday, wait until 8:00:08
         logger.info(f"Its {weekday_string} so waiting for 8 seconds")
         time.sleep(8)
-    elif weekday == 4:  # Friday, wait until 8:00:13
-        logger.info(f"Its {weekday_string} so waiting for 18 seconds")
-        time.sleep(18)
+    elif weekday == 4:  # Friday, wait until 8:00:59
+        logger.info(f"Its {weekday_string} so waiting for 59 seconds")
+        time.sleep(59)
     else:  # Other days, wait until 8:00:10
         logger.info(f"Its {weekday_string} so waiting for 10 seconds")
         time.sleep(10)
