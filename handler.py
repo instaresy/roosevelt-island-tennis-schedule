@@ -38,21 +38,52 @@ def get_days_to_book():
     elif today == 2:  # Wednesday, book for Friday (offset 2)
         return [2]
     elif today == 3:  # Thursday, book for Saturday (offset 2)
-        return [2]
-    elif today == 4:  # Friday, book for Sunday (offset 2) and Monday (offset 3)
-        return [2, 3]
+        return [2]  # Saturday (offset 2), Sunday (offset 3), Monday (offset 4)
+    elif today == 4:  # Friday, book for Sunday (offset 2) and Monday (offset 3) and Tuesday (offset 4)
+        return [2, 3, 4]
     return []
 
-# Function to get the priority list of courts and times by weekday
 def get_court_and_time_priority_by_weekday():
     return {
-        1: [[(3, 17)], [(3, 18)], [(3, 19)], [(2, 17)], [(2, 18)], [(2, 19)]],  # Tuesday
-        2: [[(3, 17)], [(3, 18)], [(3, 19)], [(5, 17)], [(5, 18)], [(5, 19)]],  # Wednesday
-        3: [[(6, 17)], [(6, 18)], [(6, 19)], [(2, 17)], [(2, 18)], [(2, 19)]],  # Thursday
-        4: [[(3, 17)], [(3, 18)], [(3, 19)], [(5, 17)], [(5, 18)], [(5, 19)]],  # Friday
-        5: [[(3, 15)], [(3, 14)], [(3, 13)], [(5, 15)], [(5, 14)], [(5, 13)]],  # Saturday
-        6: [[(6, 15),(3,15)], [(6, 14),(3,14)], [(5, 15)], [(5, 14)], [(6, 13),(3,13)], [(5, 13),(4,13)], [(4,15)], [(4,14)]],  # Sunday
-        0: [[(6, 18),(3,18)], [(6, 19),(3,19)], [(2, 18)], [(2, 19)]]   # Monday
+        0: [  # Monday
+            [(2, 16)], [(3, 16)],
+            [(2, 17)], [(3, 17)],
+            [(3, 18)], [(2, 18)], [(1, 18)],
+            [(3, 19)], [(2, 19)], [(1, 19)],
+        ],
+        1: [  # Tuesday
+            [(2, 16)], [(3, 16)],
+            [(2, 17)], [(3, 17)],
+            [(3, 18)], [(2, 18)], [(1, 18)],
+            [(3, 19)], [(2, 19)], [(1, 19)],
+        ],
+        2: [  # Wednesday
+            [(2, 16)], [(3, 16)],
+            [(2, 17)], [(3, 17)],
+            [(3, 18)], [(2, 18)], [(1, 18)],
+            [(3, 19)], [(2, 19)], [(1, 19)],
+        ],
+        3: [  # Thursday
+            [(1, 16)], [(2, 16)], [(3, 16)],
+            [(1, 17)], [(2, 17)], [(3, 17)],
+            [(3, 18)], [(2, 18)], [(1, 18)],
+            [(3, 19)], [(2, 19)], [(1, 19)],
+        ],
+        4: [  # Friday
+            [(1, 15)], [(2, 15)], [(3, 15)],
+            [(1, 16)], [(2, 16)], [(3, 16)],
+            [(1, 17)], [(2, 17)], [(3, 17)],
+        ],
+        5: [  # Saturday
+            [(6, 11)], [(5, 11)], [(4, 11)],
+            [(6, 12)], [(5, 12)], [(4, 12)],
+            [(6, 13)], [(5, 13)], [(4, 13)],
+        ],
+        6: [  # Sunday
+            [(6, 11)], [(5, 11)], [(4, 11)],
+            [(6, 12)], [(5, 12)], [(4, 12)],
+            [(6, 13)], [(5, 13)], [(4, 13)],
+        ],
     }
 
 # Randomize accounts for assignment
@@ -177,6 +208,7 @@ def conflict_check(tennis_facility_id: str, start_time: datetime, stop_time: dat
 
     try:
         response = requests.post(conflict_url, json=payload, headers=headers, cookies=session_cookies)
+        logger.info(f'Conflict check response: {response.status_code} - {response.text}')
 
         # Check if the response is an empty array
         if response.status_code == 200:

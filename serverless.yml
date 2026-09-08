@@ -9,6 +9,7 @@ provider:
   name: aws
   runtime: python3.10
   region: us-east-1  # Change the region if necessary
+  memorySize: ${env:MEMORY_SIZE}
   environment:  # Global environment variables (optional)
     ENVIRONMENT: ${env:STAGE}
     RIOC_URL: ${env:RIOC_URL}
@@ -28,6 +29,16 @@ provider:
     PW_7: ${env:PW_7}
     USERNAME_8: ${env:USERNAME_8}
     PW_8: ${env:PW_8}
+    USERNAME_9: ${env:USERNAME_9}
+    PW_9: ${env:PW_9}
+    USERNAME_10: ${env:USERNAME_10}
+    PW_10: ${env:PW_10}
+    USERNAME_11: ${env:USERNAME_11}
+    PW_11: ${env:PW_11}
+    # USERNAME_12: ${env:USERNAME_12}
+    # PW_12: ${env:PW_12}
+    USERNAME_13: ${env:USERNAME_13}
+    PW_13: ${env:PW_13}
   # Add IAM permissions for SQS globally to all functions
   iamRoleStatements:
     - Effect: "Allow"

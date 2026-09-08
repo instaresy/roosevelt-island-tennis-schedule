@@ -5,7 +5,11 @@ from util.constants import USERNAME_1, PW_1, \
                             USERNAME_5, PW_5, \
                             USERNAME_6, PW_6, \
                             USERNAME_7, PW_7, \
-                            USERNAME_8, PW_8
+                            USERNAME_8, PW_8, \
+                            USERNAME_9, PW_9, \
+                            USERNAME_10, PW_10, \
+                            USERNAME_11, PW_11, \
+                            USERNAME_13, PW_13
 
 accounts_config = {
     "account1": {
@@ -39,5 +43,25 @@ accounts_config = {
     "account8": {
         "username": USERNAME_8,
         "password": PW_8
+    },
+    "account9": {
+        "username": USERNAME_9,
+        "password": PW_9
+    },
+    "account10": {
+        "username": USERNAME_10,
+        "password": PW_10
+    },
+    "account11": {
+        "username": USERNAME_11,
+        "password": PW_11
+    },
+    # "account12": {
+    #     "username": USERNAME_12,
+    #     "password": PW_12
+    # },
+    "account13": {
+        "username": USERNAME_13,
+        "password": PW_13
     }
 }
