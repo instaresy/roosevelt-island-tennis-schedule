@@ -13,7 +13,13 @@ from util.time import wait_until_8am_est_edt
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}):
+MAX_PERMIT_ATTEMPTS = 30
+PERMIT_REQUEST_TIMEOUT = (2, 3)  # Connect and read timeouts, in seconds.
+PERMIT_RETRY_DELAY_SECONDS = 0.5
+LAMBDA_FINISH_BUFFER_SECONDS = 5
+
+
+def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}, deadline=None):
     
     permit_url = f'{RIOC_URL}/Permits'
     headers = {
@@ -51,18 +57,38 @@ def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {
         ]
     }
 
-    logger.info(f' Creating Permit --> url: {permit_url} headers: {headers} payload: {payload} cookies: {session_cookies}')
+    for attempt in range(1, MAX_PERMIT_ATTEMPTS + 1):
+        if deadline is not None and deadline - time.monotonic() < sum(PERMIT_REQUEST_TIMEOUT):
+            logger.error(f"Stopping permit attempts for {court_id}: insufficient Lambda time remaining")
+            return False
 
-    try:
-        response = requests.post(permit_url, json=payload, headers=headers, cookies=session_cookies)
-        if response.status_code == 200:
-            logger.info(f'Permit created successfully for {court_id} from {start_time} to {stop_time}')
-        else:
-            logger.error(f"Failed to create permit: {response.status_code} - {response.text}")
-    except Exception as e:
-        logger.error(f"Error creating permit: {e}")
+        logger.info(f"Creating permit for {court_id}: attempt {attempt}/{MAX_PERMIT_ATTEMPTS}")
+        try:
+            response = requests.post(
+                permit_url, json=payload, headers=headers, cookies=session_cookies,
+                timeout=PERMIT_REQUEST_TIMEOUT, allow_redirects=False,
+            )
+            if response.status_code == 200:
+                logger.info(f'Permit created successfully for {court_id} from {start_time} to {stop_time}')
+                return True
 
-def process_record(record):
+            logger.error(f"Permit attempt {attempt} failed for {court_id}: {response.status_code} - {response.text[:500]}")
+            # Retry temporary server errors and rate limits; other responses need intervention.
+            if response.status_code != 429 and not 500 <= response.status_code < 600:
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Permit attempt {attempt} failed for {court_id}: {e}")
+
+        if attempt < MAX_PERMIT_ATTEMPTS:
+            if deadline is not None and deadline - time.monotonic() < sum(PERMIT_REQUEST_TIMEOUT) + PERMIT_RETRY_DELAY_SECONDS:
+                logger.error(f"Stopping permit attempts for {court_id}: insufficient Lambda time remaining")
+                return False
+            time.sleep(PERMIT_RETRY_DELAY_SECONDS)
+
+    logger.error(f"Permit creation failed for {court_id} after {MAX_PERMIT_ATTEMPTS} attempts")
+    return False
+
+def process_record(record, deadline=None):
     eastern = pytz.timezone('America/New_York')
     body = json.loads(record['body'])
 
@@ -99,19 +125,22 @@ def process_record(record):
         time.sleep(10)
 
     # Process permit creation
-    create_permit(court_id, start_time, stop_time, session_cookies)
-    return True
+    return create_permit(court_id, start_time, stop_time, session_cookies, deadline=deadline)
 
 def process(event, context):
+    deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - LAMBDA_FINISH_BUFFER_SECONDS
     # Use ThreadPoolExecutor for parallel processing
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(process_record, record): record for record in event['Records']}
+        futures = {executor.submit(process_record, record, deadline): record for record in event['Records']}
         
         for future in as_completed(futures):
             record = futures[future]
             try:
                 result = future.result()
-                logger.info(f"Processing completed for record: {record['messageId']}")
+                if result:
+                    logger.info(f"Permit processing succeeded for record: {record['messageId']}")
+                else:
+                    logger.error(f"Permit processing failed or skipped for record: {record['messageId']}")
             except Exception as e:
                 logger.error(f"Error processing record {record['messageId']}: {str(e)}")
 
