@@ -14,12 +14,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 MAX_PERMIT_ATTEMPTS = 30
-PERMIT_REQUEST_TIMEOUT = (2, 3)  # Connect and read timeouts, in seconds.
 PERMIT_RETRY_DELAY_SECONDS = 0.5
-LAMBDA_FINISH_BUFFER_SECONDS = 5
 
 
-def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}, deadline=None):
+def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {}):
     
     permit_url = f'{RIOC_URL}/Permits'
     headers = {
@@ -58,15 +56,12 @@ def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {
     }
 
     for attempt in range(1, MAX_PERMIT_ATTEMPTS + 1):
-        if deadline is not None and deadline - time.monotonic() < sum(PERMIT_REQUEST_TIMEOUT):
-            logger.error(f"Stopping permit attempts for {court_id}: insufficient Lambda time remaining")
-            return False
-
         logger.info(f"Creating permit for {court_id}: attempt {attempt}/{MAX_PERMIT_ATTEMPTS}")
         try:
             response = requests.post(
                 permit_url, json=payload, headers=headers, cookies=session_cookies,
-                timeout=PERMIT_REQUEST_TIMEOUT, allow_redirects=False,
+                # Wait for RIOC's response before deciding whether to retry.
+                timeout=None, allow_redirects=False,
             )
             if response.status_code == 200:
                 logger.info(f'Permit created successfully for {court_id} from {start_time} to {stop_time}')
@@ -77,18 +72,16 @@ def create_permit(court_id: str, start_time, stop_time, session_cookies: any = {
             if response.status_code != 429 and not 500 <= response.status_code < 600:
                 return False
         except requests.exceptions.RequestException as e:
-            logger.error(f"Permit attempt {attempt} failed for {court_id}: {e}")
+            logger.error(f"Permit attempt {attempt} received no confirmed response for {court_id}; stopping without retry: {e}")
+            return False
 
         if attempt < MAX_PERMIT_ATTEMPTS:
-            if deadline is not None and deadline - time.monotonic() < sum(PERMIT_REQUEST_TIMEOUT) + PERMIT_RETRY_DELAY_SECONDS:
-                logger.error(f"Stopping permit attempts for {court_id}: insufficient Lambda time remaining")
-                return False
             time.sleep(PERMIT_RETRY_DELAY_SECONDS)
 
     logger.error(f"Permit creation failed for {court_id} after {MAX_PERMIT_ATTEMPTS} attempts")
     return False
 
-def process_record(record, deadline=None):
+def process_record(record):
     eastern = pytz.timezone('America/New_York')
     body = json.loads(record['body'])
 
@@ -125,13 +118,12 @@ def process_record(record, deadline=None):
         time.sleep(10)
 
     # Process permit creation
-    return create_permit(court_id, start_time, stop_time, session_cookies, deadline=deadline)
+    return create_permit(court_id, start_time, stop_time, session_cookies)
 
 def process(event, context):
-    deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - LAMBDA_FINISH_BUFFER_SECONDS
     # Use ThreadPoolExecutor for parallel processing
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(process_record, record, deadline): record for record in event['Records']}
+        futures = {executor.submit(process_record, record): record for record in event['Records']}
         
         for future in as_completed(futures):
             record = futures[future]
